@@ -1,0 +1,60 @@
+# Tri-domain sandbox
+#   red-net  : red     <-> gateway
+#   blue-net : gateway <-> blue   (internal: no internet)
+#   llm-net  : gateway <-> llm    (internal: no internet)
+# Only the gateway is attached to all three networks, so red, blue and the LLM
+# can never reach each other directly.
+
+services:
+  gateway:
+    build: { context: ., args: { SERVICE: gateway } }
+    container_name: bayora-gateway
+    environment:
+      BLUE_HOST: blue
+      LLM_HOST: llm
+      LLM_MODEL: tinyllama
+      DELAY_BUCKET_SECONDS: "15.0"   # every reply arrives at exactly this time
+      FIXED_DEADLINE: "1"
+      LLM_TIMEOUT_SECONDS: "120"
+      LLM_NUM_PREDICT: "60"
+      LEDGER_PATH: /data/ledger.jsonl
+      AUDITOR_TOKEN: bayora-demo
+      DEMO_MODE: "1"
+      MOCK_LLM: "0"        # set to "1" to demo without the Ollama model
+    volumes: [ "ledger-data:/data" ]
+    ports: [ "8000:8000" ]
+    networks: [ red-net, blue-net, llm-net ]
+    depends_on: [ blue, llm ]
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8000"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  blue:
+    build: { context: ., args: { SERVICE: blue } }
+    container_name: bayora-blue
+    networks: [ blue-net ]
+
+  llm:
+    build: ./llm
+    container_name: bayora-llm
+    networks: [ llm-net ]
+
+  red:
+    build: { context: ., args: { SERVICE: red } }
+    container_name: bayora-red
+    environment:
+      GATEWAY_HOST: gateway
+    networks: [ red-net ]
+    depends_on:
+      gateway: { condition: service_healthy }
+    restart: "no"
+
+networks:
+  red-net: {}
+  blue-net: { internal: true }
+  llm-net:  { internal: true }
+
+volumes:
+  ledger-data: {}
